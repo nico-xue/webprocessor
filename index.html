@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日常使用的Web计算器</title>
+    <!-- 引入React和React DOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- 引入Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 配置Tailwind主题 -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#FF9500',
+                        secondary: '#505050',
+                        tertiary: '#D4D4D2',
+                        background: '#FFFFFF',
+                        darkBackground: '#1C1C1C',
+                        darkSecondary: '#505050',
+                        darkTertiary: '#D4D4D2',
+                    },
+                    fontFamily: {
+                        sans: ['SF Pro Display', 'Helvetica Neue', 'Arial', 'sans-serif'],
+                    },
+                },
+            }
+        }
+    </script>
+    <!-- 自定义工具类 -->
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .calculator-btn {
+                @apply rounded-full flex items-center justify-center font-semibold transition-all duration-150 active:opacity-80 active:scale-95;
+            }
+            .number-btn {
+                @apply calculator-btn bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-darkSecondary dark:text-white dark:hover:bg-opacity-80;
+            }
+            .operator-btn {
+                @apply calculator-btn bg-primary text-white hover:bg-opacity-90;
+            }
+            .function-btn {
+                @apply calculator-btn bg-gray-300 text-gray-900 hover:bg-gray-400 dark:bg-darkTertiary dark:text-gray-900 dark:hover:bg-opacity-80;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-300">
+    <div id="root" class="w-full max-w-md mx-auto p-4 md:p-8"></div>
+
+    <script type="text/babel">
+        // 使用React 18的createRoot API
+        const { useState, useEffect, useRef } = React;
+
+        // 安全的表达式解析器，不使用eval()
+        function evaluateExpression(expression) {
+            try {
+                // 移除所有空白字符
+                const cleanExpression = expression.replace(/\s+/g, '');
+                
+                // 检查表达式是否包含非法字符
+                if (!/^[\d+\-×÷.%\(\)]+$/.test(cleanExpression)) {
+                    throw new Error('表达式包含非法字符');
+                }
+                
+                // 将乘除符号转换为JavaScript运算符
+                const jsExpression = cleanExpression
+                    .replace(/×/g, '*')
+                    .replace(/÷/g, '/')
+                    .replace(/%/g, '*0.01');
+                
+                // 这里我们使用Function构造函数作为更安全的替代方案
+                // 注意：这仍然有潜在的安全风险，但比eval要好一些
+                // 在生产环境中，应该考虑使用更复杂的解析器库
+                const result = new Function(`return ${jsExpression}`)();
+                
+                // 检查结果是否为有效数字
+                if (isNaN(result) || !isFinite(result)) {
+                    throw new Error('计算结果无效');
+                }
+                
+                return result;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // 格式化数字显示，处理大数和小数
+        function formatNumber(num) {
+            // 检查是否为整数
+            if (Number.isInteger(num)) {
+                // 处理大数，使用toLocaleString
+                if (Math.abs(num) > 999999999999) {
+                    return num.toExponential(10);
+                }
+                return num.toLocaleString('zh-CN');
+            }
+            
+            // 处理小数
+            const decimalPlaces = 10;
+            const rounded = Number(num.toFixed(decimalPlaces));
+            
+            // 如果小数部分都是0，转换为整数
+            if (Number.isInteger(rounded)) {
+                return rounded.toLocaleString('zh-CN');
+            }
+            
+            // 否则返回格式化的小数
+            return rounded.toString();
+        }
+
+        // 计算器组件
+        const Calculator = () => {
+            // 状态管理
+            const [input, setInput] = useState('');
+            const [result, setResult] = useState('0');
+            const [history, setHistory] = useState([]);
+            const [showError, setShowError] = useState(false);
+            const [darkMode, setDarkMode] = useState(false);
+            const [showHistory, setShowHistory] = useState(false);
+            
+            // 键盘事件引用
+            const calculatorRef = useRef(null);
+
+            // 切换暗色模式
+            useEffect(() => {
+                if (darkMode) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+            }, [darkMode]);
+
+            // 键盘事件处理
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    // 防止默认行为，特别是对于Enter键
+                    if (['Enter', 'Escape', 'Backspace', 'Delete', '+', '-', '*', '/', '.', '%'].includes(e.key)) {
+                        e.preventDefault();
+                    }
+                    
+                    // 数字键
+                    if (/^[0-9]$/.test(e.key)) {
+                        handleNumber(e.key);
+                    }
+                    // 运算符键
+                    else if (e.key === '+') handleOperator('+');
+                    else if (e.key === '-' || e.key === '_') handleOperator('-');
+                    else if (e.key === '*') handleOperator('×');
+                    else if (e.key === '/') handleOperator('÷');
+                    else if (e.key === '%') handlePercentage();
+                    // 小数点
+                    else if (e.key === '.') handleDecimal();
+                    // 括号
+                    else if (e.key === '(' || e.key === 'Shift' && e.key === '9') handleBracket('(');
+                    else if (e.key === ')' || e.key === 'Shift' && e.key === '0') handleBracket(')');
+                    // 清除
+                    else if (e.key === 'Escape') handleClear();
+                    else if (e.key === 'Delete') handleAllClear();
+                    else if (e.key === 'Backspace') handleBackspace();
+                    // 等于
+                    else if (e.key === 'Enter' || e.key === '=') handleCalculate();
+                };
+
+                document.addEventListener('keydown', handleKeyDown);
+                return () => document.removeEventListener('keydown', handleKeyDown);
+            }, [input]);
+
+            // 处理数字输入
+            const handleNumber = (num) => {
+                // 清除错误状态
+                if (showError) {
+                    setShowError(false);
+                    setInput(num);
+                } else {
+                    // 避免前导零
+                    if (input === '0' && num !== '0') {
+                        setInput(num);
+                    } else {
+                        setInput(prev => prev + num);
+                    }
+                }
+            };
+
+            // 处理小数点
+            const handleDecimal = () => {
+                // 清除错误状态
+                if (showError) {
+                    setShowError(false);
+                    setInput('0.');
+                    return;
+                }
+                
+                // 检查当前表达式的最后一个数字部分是否已经包含小数点
+                const parts = input.split(/[+\-×÷]/);
+                const lastPart = parts[parts.length - 1];
+                
+                if (!lastPart.includes('.')) {
+                    // 如果输入为空，添加前导零
+                    if (input === '' || ['+', '-', '×', '÷'].includes(input.slice(-1))) {
+                        setInput(prev => prev + '0.');
+                    } else {
+                        setInput(prev => prev + '.');
+                    }
+                }
+            };
+
+            // 处理运算符
+            const handleOperator = (operator) => {
+                // 清除错误状态
+                if (showError) {
+                    setShowError(false);
+                    return;
+                }
+                
+                // 如果输入为空且运算符为负号，允许输入
+                if (input === '' && operator === '-') {
+                    setInput('-');
+                    return;
+                }
+                
+                // 避免连续的运算符
+                const lastChar = input.slice(-1);
+                if (['+', '-', '×', '÷'].includes(lastChar)) {
+                    setInput(prev => prev.slice(0, -1) + operator);
+                } else {
+                    setInput(prev => prev + operator);
+                }
+            };
+
+            // 处理括号
+            const handleBracket = (bracket) => {
+                // 清除错误状态
+                if (showError) {
+                    setShowError(false);
+                    setInput(bracket);
+                    return;
+                }
+                
+                setInput(prev => prev + bracket);
+            };
+
+            // 处理百分比
+            const handlePercentage = () => {
+                // 清除错误状态
+                if (showError) {
+                    setShowError(false);
+                    setInput('0%');
+                    return;
+                }
+                
+                // 检查输入是否为空
+                if (input === '') {
+                    setInput('0%');
+                    return;
+                }
+                
+                setInput(prev => prev + '%');
+            };
+
+            // 计算结果
+            const handleCalculate = () => {
+                try {
+                    // 清除错误状态
+                    setShowError(false);
+                    
+                    // 检查输入是否为空
+                    if (input === '') return;
+                    
+                    // 计算结果
+                    const calculationResult = evaluateExpression(input);
+                    const formattedResult = formatNumber(calculationResult);
+                    
+                    // 更新结果显示
+                    setResult(formattedResult);
+                    
+                    // 添加到历史记录
+                    const historyItem = {
+                        expression: input,
+                        result: formattedResult,
+                        timestamp: new Date().toLocaleTimeString()
+                    };
+                    
+                    setHistory(prev => [historyItem, ...prev].slice(0, 10)); // 只保留最近10条
+                    
+                    // 设置输入为结果，方便继续计算
+                    setInput(formattedResult);
+                } catch (error) {
+                    setShowError(true);
+                    setResult('错误: ' + error.message);
+                }
+            };
+
+            // 清除当前输入
+            const handleClear = () => {
+                setShowError(false);
+                setInput('');
+            };
+
+            // 清除所有内容
+            const handleAllClear = () => {
+                setShowError(false);
+                setInput('');
+                setResult('0');
+            };
+
+            // 退格
+            const handleBackspace = () => {
+                if (showError) {
+                    setShowError(false);
+                    setInput('');
+                } else {
+                    setInput(prev => prev.slice(0, -1));
+                }
+            };
+
+            // 从历史记录恢复表达式
+            const restoreFromHistory = (expression) => {
+                setShowError(false);
+                setInput(expression);
+                setShowHistory(false);
+            };
+
+            // 按钮网格布局
+            const buttons = [
+                { label: 'AC', class: 'function-btn', onClick: handleAllClear },
+                { label: '⌫', class: 'function-btn', onClick: handleBackspace },
+                { label: '%', class: 'function-btn', onClick: handlePercentage },
+                { label: '÷', class: 'operator-btn', onClick: () => handleOperator('÷') },
+                
+                { label: '7', class: 'number-btn', onClick: () => handleNumber('7') },
+                { label: '8', class: 'number-btn', onClick: () => handleNumber('8') },
+                { label: '9', class: 'number-btn', onClick: () => handleNumber('9') },
+                { label: '×', class: 'operator-btn', onClick: () => handleOperator('×') },
+                
+                { label: '4', class: 'number-btn', onClick: () => handleNumber('4') },
+                { label: '5', class: 'number-btn', onClick: () => handleNumber('5') },
+                { label: '6', class: 'number-btn', onClick: () => handleNumber('6') },
+                { label: '-', class: 'operator-btn', onClick: () => handleOperator('-') },
+                
+                { label: '1', class: 'number-btn', onClick: () => handleNumber('1') },
+                { label: '2', class: 'number-btn', onClick: () => handleNumber('2') },
+                { label: '3', class: 'number-btn', onClick: () => handleNumber('3') },
+                { label: '+', class: 'operator-btn', onClick: () => handleOperator('+') },
+                
+                { label: '(', class: 'number-btn', onClick: () => handleBracket('(') },
+                { label: '0', class: 'number-btn col-span-1', onClick: () => handleNumber('0') },
+                { label: '.', class: 'number-btn', onClick: handleDecimal },
+                { label: ')', class: 'number-btn', onClick: () => handleBracket(')') },
+                
+                { label: '=', class: 'operator-btn col-span-4', onClick: handleCalculate }
+            ];
+
+            return (
+                <div 
+                    ref={calculatorRef}
+                    className="flex flex-col h-full min-h-[80vh] bg-white dark:bg-darkBackground rounded-3xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700"
+                >
+                    {/* 标题栏和模式切换 */}
+                    <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-700">
+                        <h1 className="text-xl font-bold text-gray-800 dark:text-white">计算器</h1>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setShowHistory(!showHistory)}
+                                className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                {showHistory ? '隐藏' : '历史'}
+                            </button>
+                            <button 
+                                onClick={() => setDarkMode(!darkMode)}
+                                className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                {darkMode ? '☀️' : '🌙'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 历史记录面板 */}
+                    {showHistory && (
+                        <div className="overflow-y-auto max-h-60 p-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                            {history.length === 0 ? (
+                                <p className="text-gray-500 dark:text-gray-400 text-center">暂无历史记录</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {history.map((item, index) => (
+                                        <div 
+                                            key={index} 
+                                            className="p-2 rounded-lg bg-white dark:bg-gray-700 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+                                            onClick={() => restoreFromHistory(item.expression)}
+                                        >
+                                            <div className="text-sm text-gray-500 dark:text-gray-400">{item.timestamp}</div>
+                                            <div className="text-gray-800 dark:text-white">{item.expression}</div>
+                                            <div className="text-right text-lg font-semibold text-primary">= {item.result}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* 显示区域 */}
+                    <div className="flex-1 p-6 flex flex-col justify-end items-end">
+                        {/* 输入表达式显示 */}
+                        <div className={`text-right text-xl md:text-2xl mb-2 text-gray-500 dark:text-gray-400 ${showError ? 'text-red-500' : ''}`}>
+                            {input || '0'}
+                        </div>
+                        {/* 结果显示 */}
+                        <div className={`text-right text-4xl md:text-5xl font-bold text-gray-900 dark:text-white break-all word-break-all max-w-full ${showError ? 'text-red-500' : ''}`}>
+                            {result}
+                        </div>
+                    </div>
+
+                    {/* 键盘区域 */}
+                    <div className="p-4 grid grid-cols-4 gap-3">
+                        {buttons.map((button, index) => (
+                            <button
+                                key={index}
+                                className={`${button.class} ${button.class.includes('col-span') ? button.class : ''} 
+                                    ${button.label === '0' ? 'col-span-1' : ''} 
+                                    ${button.label === '=' ? 'col-span-4' : ''}`}
+                                style={{
+                                    height: button.label === '=' ? '60px' : '70px',
+                                    fontSize: button.label === '=' ? '1.5rem' : '1.25rem'
+                                }}
+                                onClick={button.onClick}
+                            >
+                                {button.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // 渲染应用
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(
+            <React.StrictMode>
+                <Calculator />
+            </React.StrictMode>
+        );
+    </script>
+</body>
+</html>
